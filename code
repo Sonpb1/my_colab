@@ -1,0 +1,277 @@
+from google.colab import drive
+drive.mount('/content/drive')
+
+from google.colab import files
+
+# Tải file từ máy lên Colab
+uploaded = files.upload()
+
+import os
+
+# Kiểm tra các file trong thư mục hiện tại
+print(os.listdir())
+!pip install wfdb==4.2.0
+
+import wfdb
+import matplotlib.pyplot as plt
+
+# Đọc tín hiệu ECG từ đường dẫn đã đổi tên
+record = wfdb.rdrecord('/content/rec_2')
+annotation = wfdb.rdann('/content/rec_2', 'atr')
+
+# In thông tin cơ bản
+print(f"Số kênh: {record.n_sig}")
+print(f"Tần số lấy mẫu: {record.fs} Hz")
+print(f"Độ dài tín hiệu: {record.sig_len / record.fs:.2f} giây")
+
+# Hiển thị tín hiệu kênh đầu tiên
+plt.figure(figsize=(14, 6))
+
+plt.plot(record.p_signal[:3000, 0], label='ECG raw')
+plt.title("Tín hiệu ECG thô từ rec_2")
+plt.xlabel("Mẫu")
+plt.ylabel("Biên độ (mV)")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+import wfdb
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Đọc tín hiệu ECG từ file .dat/.hea/.atr
+record = wfdb.rdrecord('/content/rec_2')  # hoặc đường dẫn của bạn
+ecg_raw = record.p_signal[:, 0]  # Kênh đầu tiên
+fs = record.fs  # Tần số lấy mẫu
+
+# Số mẫu
+n = len(ecg_raw)
+
+# Biến đổi Fourier
+fft_result = np.fft.fft(ecg_raw)
+fft_freqs = np.fft.fftfreq(n, d=1/fs)
+
+# Chỉ lấy nửa phổ tần dương
+positive_freqs = fft_freqs[:n // 2]
+positive_magnitude = np.abs(fft_result[:n // 2]) / n
+
+# Vẽ phổ tần số
+plt.figure(figsize=(14, 6))
+plt.plot(positive_freqs, positive_magnitude, color='blue')
+plt.title("Phổ tần số của tín hiệu ECG raw")
+plt.xlabel("Tần số (Hz)")
+plt.ylabel("Biên độ (normalized)")
+plt.grid(True)
+plt.xlim(0, 60)
+plt.tight_layout()
+plt.show()
+
+import wfdb
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.signal import butter, filtfilt, iirnotch
+
+# ----- Đọc dữ liệu ECG từ file -----
+record = wfdb.rdrecord('/content/rec_2')
+annotation = wfdb.rdann('/content/rec_2', 'atr')
+
+ecg_raw = record.p_signal[:, 0]  # Lấy kênh đầu tiên
+fs = 500  # Tần số lấy mẫu
+
+# ----- Bộ lọc thông cao loại baseline wander (< 0.5 Hz) -----
+def highpass_filter(data, fs, cutoff=0.5, order=2):
+    b, a = butter(order, cutoff / (fs / 2), btype='high')
+    return filtfilt(b, a, data)
+
+from scipy.signal import butter, filtfilt
+
+def bandstop_filter(data, fs, lowcut=49.0, highcut=51.0, order=2):
+    nyq = fs / 2
+    low = lowcut / nyq
+    high = highcut / nyq
+    b, a = butter(order, [low, high], btype='bandstop')
+    return filtfilt(b, a, data)
+
+# ----- Áp dụng lọc nối tiếp -----
+ecg_filtered = highpass_filter(ecg_raw, fs)
+
+# Lọc nhiễu powerline bằng bandstop thay vì notch
+ecg_filtered = bandstop_filter(ecg_filtered, fs, lowcut=49, highcut=51)
+
+
+# ----- Cắt tín hiệu (3000 mẫu đầu) -----
+samples_to_show = 3000
+ecg_raw_cut = ecg_raw[:samples_to_show]
+ecg_filtered_cut = ecg_filtered[:samples_to_show]
+
+# ----- Tính FFT của tín hiệu sau lọc -----
+n = len(ecg_filtered_cut)
+fft_result = np.fft.fft(ecg_filtered_cut)
+fft_freqs = np.fft.fftfreq(n, d=1/fs)
+positive_freqs = fft_freqs[:n // 2]
+positive_magnitude = np.abs(fft_result[:n // 2]) / n
+
+# ----- Hiển thị kết quả -----
+plt.figure(figsize=(14, 12))
+
+# Biểu đồ 1: Tín hiệu ECG sau lọc
+plt.subplot(3, 1, 1)
+plt.plot(ecg_filtered_cut, color='green', linewidth=1.5)
+plt.title('Tín hiệu ECG sau lọc')
+plt.xlabel('Số mẫu')
+plt.ylabel('Biên độ (mV)')
+plt.grid(True)
+
+# Biểu đồ 2: So sánh trước và sau lọc
+plt.subplot(3, 1, 2)
+plt.plot(ecg_raw_cut, label='ECG raw (trước lọc)', alpha=0.5)
+plt.plot(ecg_filtered_cut, label='ECG đã lọc BW + 50Hz', linewidth=1.5)
+plt.title('So sánh tín hiệu ECG trước và sau lọc')
+plt.xlabel('Số mẫu')
+plt.ylabel('Biên độ (mV)')
+plt.legend()
+plt.grid(True)
+
+# Biểu đồ 3: Phổ tần số sau lọc
+plt.subplot(3, 1, 3)
+plt.plot(positive_freqs, positive_magnitude, color='purple')
+plt.title('Phổ tần số của tín hiệu ECG sau lọc')
+plt.xlabel('Tần số (Hz)')
+plt.ylabel('Biên độ (normalized)')
+plt.grid(True)
+plt.xlim(0, 60)  # Tập trung vùng quan trọng ECG (0–60 Hz)
+
+plt.tight_layout()
+plt.show()
+
+import pywt
+
+# Wavelet Denoising: giữ lại chi tiết quan trọng, loại bỏ nhiễu
+def wavelet_denoise(signal_in, wavelet='db6', level=3):
+    coeffs = pywt.wavedec(signal_in, wavelet, level=level)
+
+    # Ước lượng nhiễu và tính ngưỡng
+    sigma = np.median(np.abs(coeffs[-1])) / 0.6745
+    uthresh = sigma * np.sqrt(2 * np.log(len(signal_in)))
+
+    # Ngưỡng mềm cho các hệ số chi tiết
+    coeffs_thresh = [coeffs[0]] + [pywt.threshold(c, value=uthresh, mode='soft') for c in coeffs[1:]]
+
+    # Tái tạo tín hiệu
+    return pywt.waverec(coeffs_thresh, wavelet)
+
+# Áp dụng wavelet lên tín hiệu đã qua notch + highpass
+ecg_denoised = wavelet_denoise(ecg_filtered, wavelet='db6', level=3)
+
+samples_to_show = 3000
+
+# Cắt 3000 mẫu đầu tiên
+ecg_raw_cut = ecg_raw[:samples_to_show]
+ecg_filtered_cut = ecg_filtered[:samples_to_show]
+ecg_denoised_cut = ecg_denoised[:samples_to_show]
+
+plt.figure(figsize=(14, 8))
+
+# 1. Biểu đồ dưới: So sánh Raw vs Sau lọc vs Wavelet
+plt.subplot(2, 1, 2)
+plt.plot(ecg_raw_cut, alpha=0.3, label='ECG raw')
+plt.plot(ecg_filtered_cut, alpha=0.5, label='Sau lọc BW + 50Hz')
+plt.plot(ecg_denoised_cut, linewidth=1.5, label='Sau Wavelet')
+plt.title("So sánh tín hiệu ECG ở các bước lọc")
+plt.xlabel("Số mẫu")
+plt.ylabel("Biên độ (mV)")
+plt.legend()
+plt.grid(True)
+
+# 2. Biểu đồ trên: Chỉ tín hiệu Wavelet
+plt.subplot(2, 1, 1)
+plt.plot(ecg_denoised_cut, color='green')
+plt.title("Tín hiệu ECG sau lọc nâng cao bằng Wavelet")
+plt.xlabel("Số mẫu")
+plt.ylabel("Biên độ (mV)")
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+
+from scipy.signal import butter, filtfilt
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ---------- Bộ lọc thông thấp ----------
+def lowpass_filter(data, fs, cutoff=45.0, order=2):
+    b, a = butter(order, cutoff / (fs / 2), btype='low')
+    return filtfilt(b, a, data)
+
+# ---------- Bộ lọc trung bình trượt ----------
+def moving_average(data, window_size=5):
+    return np.convolve(data, np.ones(window_size)/window_size, mode='same')
+
+# ---------- Áp dụng lọc ----------
+ecg_lowpassed = lowpass_filter(ecg_denoised, fs)
+ecg_final = moving_average(ecg_lowpassed, window_size=5)
+
+# ---------- Cắt 3000 mẫu ----------
+samples_to_show = 3000
+ecg_raw_cut = ecg_raw[:samples_to_show]
+ecg_denoised_cut = ecg_denoised[:samples_to_show]
+ecg_final_cut = ecg_final[:samples_to_show]
+
+# ---------- Hiển thị kết quả ----------
+plt.figure(figsize=(14, 8))
+
+# Biểu đồ 1: So sánh các bước lọc
+plt.subplot(2, 1, 2)
+plt.plot(ecg_raw_cut, alpha=0.3, label='ECG raw')
+plt.plot(ecg_denoised_cut, alpha=0.6, label='Sau Wavelet')
+plt.plot(ecg_final_cut, linewidth=1.5, label='Sau Low-pass + Moving Avg')
+plt.title("So sánh các bước lọc tín hiệu ECG")
+plt.xlabel("Số mẫu")
+plt.ylabel("Biên độ (mV)")
+plt.legend()
+plt.grid(True)
+
+# Biểu đồ 2: Kết quả cuối cùng
+plt.subplot(2, 1, 1)
+plt.plot(ecg_final_cut, color='darkgreen')
+plt.title("Tín hiệu ECG sau lọc hoàn chỉnh")
+plt.xlabel("Số mẫu")
+plt.ylabel("Biên độ (mV)")
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
+
+def smooth_ecg(data, window_size=5):
+    return np.convolve(data, np.ones(window_size)/window_size, mode='same')
+
+ecg_smoothed = smooth_ecg(ecg_final)
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Giả sử bạn đã có biến: ecg_final hoặc ecg_smoothed (1D array), và biến fs (tần số lấy mẫu)
+
+# Bước 1: Xử lý tín hiệu đầu vào
+signal = ecg_smoothed  # hoặc ecg_final, ecg_denoised
+n = len(signal)
+
+# Bước 2: Biến đổi Fourier
+fft_result = np.fft.fft(signal)
+fft_freqs = np.fft.fftfreq(n, d=1/fs)
+
+# Bước 3: Lấy nửa phổ tần số dương
+positive_freqs = fft_freqs[:n // 2]
+positive_magnitude = np.abs(fft_result[:n // 2]) / n  # Chuẩn hóa
+
+# Bước 4: Vẽ phổ tần số
+plt.figure(figsize=(16, 6))
+plt.plot(positive_freqs, positive_magnitude, color='darkgreen')
+plt.title("Phổ tần số của tín hiệu ECG sau lọc")
+plt.xlabel("Tần số (Hz)")
+plt.ylabel("Biên độ (normalized)")
+plt.grid(True)
+plt.xlim(0, 60)  # ECG thường nằm trong 0–50Hz, nhưng vẽ tới 100 để kiểm tra
+plt.tight_layout()
+plt.show()
